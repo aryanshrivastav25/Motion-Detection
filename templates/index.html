@@ -1,0 +1,1056 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ActionWatch — Live Threat Detection</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700;900&family=Barlow+Condensed:wght@700;900&display=swap" rel="stylesheet" />
+
+  <style>
+    /* ── Tokens ──────────────────────────────────────────── */
+    :root {
+      --bg:        #080c10;
+      --bg2:       #0d1117;
+      --bg3:       #131b24;
+      --border:    #1d2d3e;
+      --accent:    #00d4ff;
+      --accent2:   #0088aa;
+      --danger:    #ff3b3b;
+      --danger2:   #8b0000;
+      --warning:   #ffb300;
+      --ok:        #00e676;
+      --ok2:       #007040;
+      --muted:     #4a6070;
+      --text:      #cdd9e5;
+      --text2:     #8ba3b8;
+      --mono:      'Share Tech Mono', monospace;
+      --sans:      'Barlow', sans-serif;
+      --cond:      'Barlow Condensed', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      overflow-x: hidden;
+    }
+
+    /* ── Scanline overlay ────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,212,255,0.012) 2px,
+        rgba(0,212,255,0.012) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── Header ──────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 32px;
+      height: 58px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      position: sticky; top: 0; z-index: 100;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo-icon {
+      width: 34px; height: 34px;
+      background: var(--accent);
+      clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+      display: flex; align-items: center; justify-content: center;
+      animation: pulse-icon 3s ease-in-out infinite;
+    }
+    @keyframes pulse-icon {
+      0%,100% { opacity: 1; }
+      50% { opacity: 0.65; }
+    }
+    .logo-text {
+      font-family: var(--cond);
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 3px;
+      color: #fff;
+      text-transform: uppercase;
+    }
+    .logo-text span { color: var(--accent); }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+    .sys-time {
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .status-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background .3s;
+    }
+    .status-dot.live { background: var(--danger); animation: blink .8s step-end infinite; }
+    .status-dot.ok   { background: var(--ok); }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* ── Global alert banner ─────────────────────────────── */
+    #alert-banner {
+      display: none;
+      position: fixed;
+      top: 58px; left: 0; right: 0;
+      z-index: 200;
+      background: linear-gradient(90deg, var(--danger2), #3b0000 40%, var(--danger2));
+      border-bottom: 2px solid var(--danger);
+      padding: 10px 32px;
+      animation: slide-in .25s ease;
+    }
+    #alert-banner.visible { display: flex; align-items: center; gap: 14px; }
+    @keyframes slide-in {
+      from { transform: translateY(-100%); opacity: 0; }
+      to   { transform: translateY(0);    opacity: 1; }
+    }
+    .alert-icon {
+      font-size: 22px;
+      animation: shake .4s ease infinite alternate;
+    }
+    @keyframes shake {
+      from { transform: rotate(-8deg) scale(1.1); }
+      to   { transform: rotate( 8deg) scale(0.9); }
+    }
+    .alert-text {
+      flex: 1;
+    }
+    .alert-text strong {
+      font-family: var(--cond);
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #fff;
+      text-transform: uppercase;
+    }
+    .alert-text small {
+      display: block;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: rgba(255,255,255,0.6);
+      margin-top: 1px;
+    }
+    .alert-dismiss {
+      background: none;
+      border: 1px solid rgba(255,59,59,.6);
+      color: var(--danger);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 5px 12px;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .alert-dismiss:hover { background: var(--danger); color: #fff; }
+
+    /* ── Tabs ────────────────────────────────────────────── */
+    .tabs-bar {
+      display: flex;
+      gap: 0;
+      padding: 0 32px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+    }
+    .tab-btn {
+      position: relative;
+      font-family: var(--cond);
+      font-size: 14px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 14px 28px;
+      background: none;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      transition: color .2s;
+    }
+    .tab-btn::after {
+      content: '';
+      position: absolute;
+      bottom: -1px; left: 0; right: 0;
+      height: 2px;
+      background: var(--accent);
+      transform: scaleX(0);
+      transition: transform .2s;
+    }
+    .tab-btn.active { color: var(--accent); }
+    .tab-btn.active::after { transform: scaleX(1); }
+
+    /* ── Page layout ──────────────────────────────────────── */
+    .main {
+      max-width: 1320px;
+      margin: 0 auto;
+      padding: 28px 32px 60px;
+    }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    /* ── Live panel ───────────────────────────────────────── */
+    .live-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 20px;
+      align-items: start;
+    }
+
+    /* Camera viewport */
+    .cam-wrap {
+      position: relative;
+      background: #000;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      aspect-ratio: 16/9;
+    }
+    .cam-wrap img {
+      width: 100%; height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .cam-overlay {
+      position: absolute; inset: 0;
+      pointer-events: none;
+    }
+    /* Corner brackets */
+    .cam-overlay::before,
+    .cam-overlay::after {
+      content: '';
+      position: absolute;
+      width: 28px; height: 28px;
+      border-color: var(--accent);
+      border-style: solid;
+      opacity: .5;
+    }
+    .cam-overlay::before {
+      top: 12px; left: 12px;
+      border-width: 2px 0 0 2px;
+    }
+    .cam-overlay::after {
+      bottom: 12px; right: 12px;
+      border-width: 0 2px 2px 0;
+    }
+    .cam-placeholder {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px;
+      color: var(--muted);
+    }
+    .cam-placeholder svg { opacity: .3; }
+    .cam-placeholder p { font-family: var(--mono); font-size: 13px; }
+
+    /* Side panel */
+    .side-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .panel-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      padding: 20px;
+    }
+    .panel-card h3 {
+      font-family: var(--cond);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 16px;
+    }
+
+    /* Big action display */
+    .action-display {
+      text-align: center;
+      padding: 12px 0;
+    }
+    .action-label {
+      font-family: var(--cond);
+      font-size: 38px;
+      font-weight: 900;
+      letter-spacing: 2px;
+      color: #fff;
+      line-height: 1;
+      transition: color .3s;
+    }
+    .action-label.danger { color: var(--danger); }
+    .action-label.ok     { color: var(--ok); }
+
+    .action-raw {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: 8px;
+      min-height: 16px;
+    }
+
+    .conf-bar-wrap {
+      margin-top: 16px;
+    }
+    .conf-bar-label {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .conf-bar {
+      height: 4px;
+      background: var(--border);
+      overflow: hidden;
+    }
+    .conf-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width .4s ease;
+    }
+
+    /* Buttons */
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 13px;
+      font-family: var(--cond);
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      border: none;
+      cursor: pointer;
+      transition: all .2s;
+    }
+    .btn-start {
+      background: var(--accent);
+      color: #000;
+    }
+    .btn-start:hover { background: #fff; }
+    .btn-stop {
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+    }
+    .btn-stop:hover { background: var(--danger); color: #fff; }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+
+    /* Alert history list */
+    .alert-log {
+      max-height: 200px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .alert-log::-webkit-scrollbar { width: 4px; }
+    .alert-log::-webkit-scrollbar-track { background: var(--bg); }
+    .alert-log::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .log-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg3);
+      border-left: 3px solid transparent;
+      font-family: var(--mono);
+      font-size: 11px;
+      animation: fade-in .3s ease;
+    }
+    @keyframes fade-in { from { opacity: 0; transform: translateX(-6px); } }
+    .log-item.danger { border-left-color: var(--danger); }
+    .log-item.normal { border-left-color: var(--ok2); }
+    .log-time { color: var(--muted); flex-shrink: 0; }
+    .log-action { color: var(--text); }
+    .log-empty { font-family: var(--mono); font-size: 11px; color: var(--muted); padding: 8px 0; }
+
+    /* ── Upload panel ────────────────────────────────────── */
+    .upload-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.6fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .dropzone {
+      border: 2px dashed var(--border);
+      padding: 48px 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+    }
+    .dropzone:hover, .dropzone.drag-over {
+      border-color: var(--accent);
+      background: rgba(0,212,255,.04);
+    }
+    .dropzone input[type=file] {
+      position: absolute; inset: 0;
+      opacity: 0; cursor: pointer;
+      width: 100%; height: 100%;
+    }
+    .dropzone-icon {
+      font-size: 42px;
+      line-height: 1;
+      margin-bottom: 16px;
+      opacity: .4;
+    }
+    .dropzone h4 {
+      font-family: var(--cond);
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: var(--text2);
+      margin-bottom: 8px;
+    }
+    .dropzone p {
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .file-info {
+      display: none;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: var(--bg3);
+      border-left: 3px solid var(--accent);
+      font-family: var(--mono);
+      font-size: 12px;
+      color: var(--text2);
+    }
+    .file-info.visible { display: block; }
+
+    .btn-upload {
+      background: linear-gradient(135deg, var(--accent2), var(--accent));
+      color: #000;
+      margin-top: 12px;
+    }
+    .btn-upload:hover { opacity: .85; }
+
+    /* Progress */
+    .progress-wrap {
+      display: none;
+      margin-top: 14px;
+    }
+    .progress-wrap.visible { display: block; }
+    .progress-label {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+    .progress-track {
+      height: 3px;
+      background: var(--border);
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      background: var(--accent);
+      width: 0%;
+      transition: width .4s ease;
+    }
+    .progress-fill.indeterminate {
+      width: 40%;
+      animation: indeterminate 1.2s ease infinite;
+    }
+    @keyframes indeterminate {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(350%); }
+    }
+
+    /* Results panel */
+    .results-panel {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+    }
+
+    .results-header {
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .results-header h3 {
+      font-family: var(--cond);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    .results-meta {
+      display: flex;
+      gap: 20px;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .meta-pill {
+      font-family: var(--mono);
+      font-size: 11px;
+    }
+    .meta-pill span { color: var(--muted); }
+    .meta-pill strong { color: var(--text); }
+    .meta-pill.alert-count strong { color: var(--danger); }
+
+    .results-timeline {
+      max-height: 520px;
+      overflow-y: auto;
+    }
+    .results-timeline::-webkit-scrollbar { width: 4px; }
+    .results-timeline::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .result-row {
+      display: grid;
+      grid-template-columns: 80px 1fr 100px 80px;
+      gap: 0;
+      padding: 0;
+      border-bottom: 1px solid rgba(29,45,62,.6);
+      align-items: stretch;
+    }
+    .result-row:last-child { border-bottom: none; }
+    .result-row.danger-row { background: rgba(139,0,0,.08); }
+    .result-row.danger-row:hover { background: rgba(139,0,0,.14); }
+    .result-row:not(.danger-row):hover { background: rgba(0,212,255,.03); }
+
+    .r-cell {
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+    .r-cell.time   { color: var(--muted); border-right: 1px solid var(--border); }
+    .r-cell.action { color: var(--text); gap: 10px; }
+    .r-cell.conf   { color: var(--muted); justify-content: flex-end; }
+    .r-cell.badge  { justify-content: center; border-left: 1px solid var(--border); }
+
+    .action-badge {
+      display: inline-block;
+      font-family: var(--cond);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      padding: 3px 8px;
+      text-transform: uppercase;
+    }
+    .action-badge.danger { background: rgba(255,59,59,.15); color: var(--danger); border: 1px solid rgba(255,59,59,.3); }
+    .action-badge.normal { background: rgba(0,230,118,.08); color: var(--ok); border: 1px solid rgba(0,230,118,.2); }
+
+    .results-empty {
+      padding: 60px 20px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    /* Alert counter badge in header */
+    .alert-count-badge {
+      display: none;
+      background: var(--danger);
+      color: #fff;
+      font-family: var(--mono);
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 2px;
+      margin-left: 8px;
+    }
+
+    /* Responsive */
+    @media (max-width: 900px) {
+      .live-grid, .upload-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 600px) {
+      header, .tabs-bar, .main { padding-left: 16px; padding-right: 16px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────── -->
+<header>
+  <div class="logo">
+    <div class="logo-icon"></div>
+    <span class="logo-text">Action<span>Watch</span></span>
+  </div>
+  <div class="header-right">
+    <span class="sys-time" id="sys-time">--:--:--</span>
+    <div class="status-dot" id="header-dot" title="Camera status"></div>
+  </div>
+</header>
+
+<!-- ── Alert Banner ────────────────────────────────────────────────────── -->
+<div id="alert-banner">
+  <span class="alert-icon">⚠</span>
+  <div class="alert-text">
+    <strong id="alert-title">THREAT DETECTED</strong>
+    <small id="alert-detail">Analyzing feed…</small>
+  </div>
+  <button class="alert-dismiss" onclick="dismissAlert()">DISMISS</button>
+</div>
+
+<!-- ── Tabs ────────────────────────────────────────────────────────────── -->
+<div class="tabs-bar">
+  <button class="tab-btn active" onclick="switchTab('live', this)">
+    ◉ Live Detection
+  </button>
+  <button class="tab-btn" onclick="switchTab('upload', this)">
+    ↑ Video Upload
+  </button>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- LIVE PANEL                                                             -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="main">
+<div class="tab-panel active" id="panel-live">
+  <div class="live-grid">
+
+    <!-- Camera feed -->
+    <div>
+      <div class="cam-wrap" id="cam-wrap">
+        <div class="cam-placeholder" id="cam-placeholder">
+          <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+            <rect x="4" y="14" width="56" height="40" rx="4" stroke="#4a6070" stroke-width="2"/>
+            <circle cx="32" cy="34" r="10" stroke="#4a6070" stroke-width="2"/>
+            <circle cx="32" cy="34" r="4"  fill="#4a6070"/>
+            <rect x="22" y="10" width="20" height="8" rx="2" stroke="#4a6070" stroke-width="2"/>
+          </svg>
+          <p>Camera inactive — press Start</p>
+        </div>
+        <img id="cam-img" src="" alt="Live feed" style="display:none;" />
+        <div class="cam-overlay"></div>
+      </div>
+    </div>
+
+    <!-- Side panel -->
+    <div class="side-panel">
+
+      <!-- Current action -->
+      <div class="panel-card">
+        <h3>Current Detection</h3>
+        <div class="action-display">
+          <div class="action-label" id="action-label">—</div>
+          <div class="action-raw"  id="action-raw"></div>
+        </div>
+        <div class="conf-bar-wrap">
+          <div class="conf-bar-label">
+            <span>Confidence</span>
+            <span id="conf-pct">—</span>
+          </div>
+          <div class="conf-bar">
+            <div class="conf-bar-fill" id="conf-fill"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Controls -->
+      <div class="panel-card">
+        <h3>Camera Control</h3>
+        <button class="btn btn-start" id="btn-start" onclick="startCamera()">▶ Start Camera</button>
+        <button class="btn btn-stop" id="btn-stop" onclick="stopCamera()" disabled style="margin-top:10px;">■ Stop Camera</button>
+      </div>
+
+      <!-- Alert log -->
+      <div class="panel-card">
+        <h3>Event Log <span class="alert-count-badge" id="alert-count-badge">0</span></h3>
+        <div class="alert-log" id="alert-log">
+          <div class="log-empty" id="log-empty">No events yet.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<!-- UPLOAD PANEL                                                           -->
+<!-- ══════════════════════════════════════════════════════════════════════ -->
+<div class="tab-panel" id="panel-upload">
+  <div class="upload-grid">
+
+    <!-- Left: upload form -->
+    <div>
+      <div class="panel-card">
+        <h3>Upload Video</h3>
+
+        <div class="dropzone" id="dropzone"
+             ondragover="handleDragOver(event)"
+             ondragleave="handleDragLeave(event)"
+             ondrop="handleDrop(event)">
+          <input type="file" id="video-file-input" accept="video/*"
+                 onchange="handleFileSelect(event)" />
+          <div class="dropzone-icon">🎬</div>
+          <h4>Drop video here</h4>
+          <p>or click to browse</p>
+          <p style="margin-top:6px; font-size:10px;">MP4, AVI, MOV, MKV · max 500 MB</p>
+        </div>
+
+        <div class="file-info" id="file-info">
+          <span id="file-name-display"></span>
+        </div>
+
+        <div class="progress-wrap" id="progress-wrap">
+          <div class="progress-label" id="progress-label">Processing…</div>
+          <div class="progress-track">
+            <div class="progress-fill indeterminate" id="progress-fill"></div>
+          </div>
+        </div>
+
+        <button class="btn btn-upload" id="btn-upload" onclick="uploadVideo()" disabled style="margin-top:12px;">
+          ↑ Analyse Video
+        </button>
+      </div>
+
+      <!-- Legend -->
+      <div class="panel-card" style="margin-top:16px;">
+        <h3>Action Categories</h3>
+        <div style="display:flex; flex-direction:column; gap:8px; margin-top:4px;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:4px; height:28px; background:var(--danger);"></div>
+            <div>
+              <div style="font-family:var(--cond); font-size:14px; font-weight:700; color:var(--danger);">FALL / FIGHT</div>
+              <div style="font-family:var(--mono); font-size:10px; color:var(--muted);">Triggers alert</div>
+            </div>
+          </div>
+          <div style="display:flex; align-items:center; gap:10px;">
+            <div style="width:4px; height:28px; background:var(--ok);"></div>
+            <div>
+              <div style="font-family:var(--cond); font-size:14px; font-weight:700; color:var(--ok);">SIT / STAND / MOVE</div>
+              <div style="font-family:var(--mono); font-size:10px; color:var(--muted);">Normal activity</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: results -->
+    <div class="results-panel" id="results-panel">
+      <div class="results-header">
+        <h3>Analysis Results</h3>
+        <span style="font-family:var(--mono); font-size:11px; color:var(--muted);" id="result-status">
+          No video analysed yet
+        </span>
+      </div>
+      <div class="results-meta" id="results-meta" style="display:none;"></div>
+      <div class="results-timeline" id="results-timeline">
+        <div class="results-empty">Upload a video to see the per-clip analysis.</div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</div><!-- /main -->
+
+
+<script>
+/* ── Utility ──────────────────────────────────────────────────────────── */
+function pad2(n) { return String(n).padStart(2,'0'); }
+
+function nowStr() {
+  const d = new Date();
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+// Clock
+setInterval(() => {
+  document.getElementById('sys-time').textContent = nowStr();
+}, 1000);
+document.getElementById('sys-time').textContent = nowStr();
+
+/* ── Tab switching ────────────────────────────────────────────────────── */
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+/* ── Alert Banner ─────────────────────────────────────────────────────── */
+let alertDismissed = false;
+let lastAlertAction = '';
+
+function showAlert(action, detail) {
+  if (alertDismissed && action === lastAlertAction) return;
+  alertDismissed = false;
+  lastAlertAction = action;
+  document.getElementById('alert-title').textContent = `⚠ ${action} DETECTED`;
+  document.getElementById('alert-detail').textContent = detail || `Detected at ${nowStr()}`;
+  const banner = document.getElementById('alert-banner');
+  banner.classList.add('visible');
+  // auto-dismiss after 8 s
+  clearTimeout(window._alertTimer);
+  window._alertTimer = setTimeout(dismissAlert, 8000);
+}
+
+function hideAlert() {
+  document.getElementById('alert-banner').classList.remove('visible');
+}
+
+function dismissAlert() {
+  hideAlert();
+  alertDismissed = true;
+}
+
+/* ── Live Camera ──────────────────────────────────────────────────────── */
+let pollTimer = null;
+let logCount  = 0;
+let alertBadgeCount = 0;
+
+function startCamera() {
+  fetch('/start_camera', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      const img = document.getElementById('cam-img');
+      img.src = '/video_feed?t=' + Date.now();
+      img.style.display = 'block';
+      document.getElementById('cam-placeholder').style.display = 'none';
+      document.getElementById('btn-start').disabled = true;
+      document.getElementById('btn-stop').disabled  = false;
+      document.getElementById('header-dot').className = 'status-dot live';
+      alertDismissed = false;
+      startPolling();
+    });
+}
+
+function stopCamera() {
+  fetch('/stop_camera', { method: 'POST' })
+    .then(r => r.json())
+    .then(() => {
+      stopPolling();
+      const img = document.getElementById('cam-img');
+      img.style.display = 'none';
+      img.src = '';
+      document.getElementById('cam-placeholder').style.display = 'flex';
+      document.getElementById('btn-start').disabled = false;
+      document.getElementById('btn-stop').disabled  = true;
+      document.getElementById('header-dot').className = 'status-dot';
+      setActionDisplay('—', '', false, 0);
+      hideAlert();
+    });
+}
+
+function startPolling() {
+  clearInterval(pollTimer);
+  pollTimer = setInterval(pollStatus, 700);
+}
+function stopPolling() {
+  clearInterval(pollTimer);
+}
+
+function pollStatus() {
+  fetch('/cam_status')
+    .then(r => r.json())
+    .then(data => {
+      if (!data.active) { stopPolling(); return; }
+      setActionDisplay(data.prediction, data.raw_label, data.alert, data.confidence);
+
+      if (data.alert) {
+        showAlert(data.prediction, `Raw: ${data.raw_label} · ${nowStr()}`);
+        addLogEntry(data.prediction, data.raw_label, true);
+      }
+    })
+    .catch(() => {});
+}
+
+function setActionDisplay(action, raw, isAlert, conf) {
+  const lbl = document.getElementById('action-label');
+  const rawEl = document.getElementById('action-raw');
+  const confPct = document.getElementById('conf-pct');
+  const confFill = document.getElementById('conf-fill');
+
+  lbl.textContent = action;
+  lbl.className = 'action-label' + (isAlert ? ' danger' : (action !== '—' ? ' ok' : ''));
+  rawEl.textContent = raw ? `Kinetics-400: ${raw}` : '';
+
+  if (conf > 0) {
+    const pct = Math.round(conf * 100);
+    confPct.textContent  = pct + '%';
+    confFill.style.width = pct + '%';
+    confFill.style.background = isAlert ? 'var(--danger)' : 'var(--accent)';
+  } else {
+    confPct.textContent  = '—';
+    confFill.style.width = '0%';
+  }
+}
+
+let lastLogKey = '';
+function addLogEntry(action, raw, isAlert) {
+  const key = action + '|' + nowStr().slice(0,5); // de-dupe within same minute
+  if (key === lastLogKey) return;
+  lastLogKey = key;
+
+  const log = document.getElementById('alert-log');
+  const empty = document.getElementById('log-empty');
+  if (empty) empty.remove();
+
+  const item = document.createElement('div');
+  item.className = 'log-item ' + (isAlert ? 'danger' : 'normal');
+  item.innerHTML = `
+    <span class="log-time">${nowStr()}</span>
+    <span class="log-action">${action}</span>
+  `;
+  log.prepend(item);
+  logCount++;
+
+  if (isAlert) {
+    alertBadgeCount++;
+    const badge = document.getElementById('alert-count-badge');
+    badge.textContent = alertBadgeCount;
+    badge.style.display = 'inline-block';
+  }
+
+  // Keep max 50 entries
+  while (log.children.length > 50) log.lastChild.remove();
+}
+
+/* ── Upload ───────────────────────────────────────────────────────────── */
+let selectedFile = null;
+
+function handleFileSelect(evt) {
+  selectedFile = evt.target.files[0];
+  showFileInfo();
+}
+function handleDragOver(evt) {
+  evt.preventDefault();
+  document.getElementById('dropzone').classList.add('drag-over');
+}
+function handleDragLeave() {
+  document.getElementById('dropzone').classList.remove('drag-over');
+}
+function handleDrop(evt) {
+  evt.preventDefault();
+  document.getElementById('dropzone').classList.remove('drag-over');
+  selectedFile = evt.dataTransfer.files[0];
+  showFileInfo();
+}
+function showFileInfo() {
+  if (!selectedFile) return;
+  const fi = document.getElementById('file-info');
+  const mb = (selectedFile.size / 1024 / 1024).toFixed(1);
+  document.getElementById('file-name-display').textContent =
+    `📄 ${selectedFile.name}  ·  ${mb} MB`;
+  fi.classList.add('visible');
+  document.getElementById('btn-upload').disabled = false;
+}
+
+function uploadVideo() {
+  if (!selectedFile) return;
+
+  const fd = new FormData();
+  fd.append('video', selectedFile);
+
+  document.getElementById('btn-upload').disabled = true;
+  document.getElementById('progress-wrap').classList.add('visible');
+  document.getElementById('progress-label').textContent = 'Uploading & processing…';
+  document.getElementById('results-timeline').innerHTML =
+    '<div class="results-empty">Analysing — this may take a moment…</div>';
+  document.getElementById('results-meta').style.display = 'none';
+  document.getElementById('result-status').textContent = 'Processing…';
+
+  fetch('/upload_video', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(data => {
+      document.getElementById('progress-wrap').classList.remove('visible');
+      document.getElementById('btn-upload').disabled = false;
+      if (data.error) {
+        document.getElementById('results-timeline').innerHTML =
+          `<div class="results-empty" style="color:var(--danger);">Error: ${data.error}</div>`;
+        return;
+      }
+      renderResults(data.results, data.meta);
+    })
+    .catch(err => {
+      document.getElementById('progress-wrap').classList.remove('visible');
+      document.getElementById('btn-upload').disabled = false;
+      document.getElementById('results-timeline').innerHTML =
+        `<div class="results-empty" style="color:var(--danger);">Upload failed: ${err}</div>`;
+    });
+}
+
+function renderResults(results, meta) {
+  document.getElementById('result-status').textContent =
+    `${results.length} clips analysed`;
+
+  // Meta bar
+  const metaDiv = document.getElementById('results-meta');
+  const alertCount = meta.alerts;
+  metaDiv.style.display = 'flex';
+  metaDiv.innerHTML = `
+    <div class="meta-pill"><span>Duration </span><strong>${meta.duration}s</strong></div>
+    <div class="meta-pill"><span>FPS </span><strong>${meta.fps}</strong></div>
+    <div class="meta-pill"><span>Clips </span><strong>${meta.total_clips}</strong></div>
+    <div class="meta-pill ${alertCount > 0 ? 'alert-count' : ''}">
+      <span>Alerts </span><strong>${alertCount}</strong>
+    </div>
+  `;
+
+  if (alertCount > 0) {
+    showAlert(
+      results.find(r => r.alert)?.action || 'THREAT',
+      `${alertCount} alert(s) found in uploaded video`
+    );
+  }
+
+  if (results.length === 0) {
+    document.getElementById('results-timeline').innerHTML =
+      '<div class="results-empty">No clips could be extracted.</div>';
+    return;
+  }
+
+  const timeline = document.getElementById('results-timeline');
+  timeline.innerHTML = '';
+
+  results.forEach(r => {
+    const row = document.createElement('div');
+    row.className = 'result-row' + (r.alert ? ' danger-row' : '');
+    const badgeClass = r.alert ? 'danger' : 'normal';
+    row.innerHTML = `
+      <div class="r-cell time">${r.time_fmt}</div>
+      <div class="r-cell action">
+        <span>${r.action}</span>
+      </div>
+      <div class="r-cell conf">${Math.round(r.confidence * 100)}%</div>
+      <div class="r-cell badge">
+        <span class="action-badge ${badgeClass}">
+          ${r.alert ? '⚠ ALERT' : 'OK'}
+        </span>
+      </div>
+    `;
+    timeline.appendChild(row);
+  });
+}
+</script>
+</body>
+</html>
